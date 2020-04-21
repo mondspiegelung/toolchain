@@ -4,7 +4,7 @@ renice -n 19 -p $$
 
 BASE_DIR=$(realpath $(dirname $0))
 
-TC_VERSION=${TC_VERSION:-toolchain-9.x}
+TC_VERSION=${TC_VERSION:-toolchain-new}
 SOURCE_DIR=${SOURCE_DIR:-${BASE_DIR}/SOURCE}
 BUILD_DIR=${BUILD_DIR:-/scratch/BUILD}
 INSTALL_DIR=${INSTALL_DIR:-${HOME}/opt/${TC_VERSION}}
@@ -297,7 +297,7 @@ function build_binutils()
 	if [ "$DO_TESTS" -eq "1" ]
 	then
 		echo "Checking binutils... "
-		time make check
+		time make check \
 			2>&1 | tee ${BUILD_DIR}/binutils-check.log > $OUT
 	fi
 
@@ -490,13 +490,12 @@ function build_vim()
 LLVMLOC="https://github.com/llvm/llvm-project/releases/download"
 
 xPackages="
-	https://tukaani.org/xz/xz-5.2.5.tar.xz
-
 	https://www.python.org/ftp/python/3.8.2/Python-3.8.2.tar.xz
 "
 
 PACKAGES="
 	https://www.zlib.net/zlib-1.2.11.tar.gz
+	https://tukaani.org/xz/xz-5.2.5.tar.xz
 	ftp://gcc.gnu.org/pub/gcc/infrastructure/gmp-6.1.0.tar.bz2
 	https://ftp.gnu.org/gnu/guile/guile-2.0.14.tar.xz
 	http://ftp.gnu.org/gnu/autogen/autogen-5.18.7.tar.xz
@@ -505,7 +504,6 @@ PACKAGES="
 	ftp://gcc.gnu.org/pub/gcc/infrastructure/isl-0.18.tar.bz2
 	http://mirror.us-midwest-1.nexcess.net/gnu/binutils/binutils-2.34.tar.xz
 	https://bigsearcher.com/mirrors/gcc/releases/gcc-9.3.0/gcc-9.3.0.tar.xz
-
 	${LLVMLOC}/llvmorg-9.0.1/clang-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/clang-tools-extra-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/compiler-rt-9.0.1.src.tar.xz
@@ -513,7 +511,6 @@ PACKAGES="
 	${LLVMLOC}/llvmorg-9.0.1/libcxxabi-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/lld-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/llvm-9.0.1.src.tar.xz
-
 	https://github.com/vim/vim.git
 "
 
