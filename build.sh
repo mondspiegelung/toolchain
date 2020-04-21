@@ -1,20 +1,42 @@
 #!/bin/bash
 
-renice -n 19 -p $$
+renice -n 5 -p $$
 
+# We pick BASE_DIR to be the directory of this script. While there aren't
+# any supplemental scripts or data files needed by this yet, it is possible
+# that we'll pull in metadata or source functions that live in this same
+# directory hierarchy
 BASE_DIR=$(realpath $(dirname $0))
 
-TC_VERSION=${TC_VERSION:-toolchain-new}
+# The next few variables are overridable by setting corresponding environment
+# variables. Their use is as follows:
+#   - SOURCE_DIR: Directory for downloading package tarballs (defaults to
+#     ${BASE_DIR}/SOURCE
+#   - BUILD_DIR: Directory where all compilation will occur in. This directory
+#     *will* grow quite large (tens of gigabytes). It is useful to place it
+#     on a fast disk if you wish to speed your build.
+#   - TC_NAME: Name of the top-level toolchain directory. This defaults to
+#     'toolchain-9.x' currently.
+#   - INSTALL_DIR: Directory into which the new toolchain is installed.
+#     Defaults to ${HOME}/opt/${TC_NAME}. Note: currently to install into
+#     a system directory hierarchy, this entire script needs root access; this
+#     is a large security consideration, and will be mitigated soon.
+TC_NAME=${TC_NAME:-toolchain-9.x}
 SOURCE_DIR=${SOURCE_DIR:-${BASE_DIR}/SOURCE}
-BUILD_DIR=${BUILD_DIR:-/scratch/BUILD}
-INSTALL_DIR=${INSTALL_DIR:-${HOME}/opt/${TC_VERSION}}
+BUILD_DIR=${BUILD_DIR:${BASE_DIR}/BUILD}
+INSTALL_DIR=${INSTALL_DIR:-${HOME}/opt/${TC_NAME}}
 
 echo "Starting build of toolchain..."
 echo -e "\tArchive dowload directory = $SOURCE_DIR"
 echo -e "\tPackage build directory = $BUILD_DIR"
 echo -e "\tToolchain installation directory = $INSTALL_DIR"
 
-PARALLEL="-j $(( $(nproc) ))"
+# PARALLEL determines the largest number of concurrent processes that make or
+# ninja may execute; it is set to the value of the nproc command by default
+PARALLEL="-j $(nproc)"
+
+# Changing OUT to /dev/stderr will show the output of individual build
+# commands (not recommended, but sometimes useful for debugging)
 OUT=/dev/null
 #OUT=/dev/stderr
 
@@ -24,14 +46,16 @@ export TIMEFORMAT=$'    (%P%%) real: %lR, user: %lU, sys: %lS'
 # add our install directory to our path
 export PATH="${INSTALL_DIR}/bin:$PATH"
 
-# and ${INSTALL_DIR}/lib to LD_RUN_PATH - we use this to set the DT_RUNPATH
-# ELF attribute so that LD_LIBRARY_PATH can override it for users if needed
-# export LD_RUN_PATH=${INSTALL_DIR}/lib:$LD_RUN_PATH
-
 # FIXME - this may not be necessary
 export PKG_CONFIG_PATH=${INSTALL_DIR}/lib/pkgconfig:$PKG_CONFIG_PATH
 
+# Run program test suites
 DO_TESTS=1
+
+# ARCH is used to set the ISA for the build...
+ARCH=${ARCH:-nehalem}
+
+UPDATE_REPOS=1
 
 ##
 # Pulls the top-level directory name out of a tarbal
@@ -75,7 +99,7 @@ function build_zlib()
 	dir="$1"
 	cd $1
 	echo "Configuring zlib... "
-	time CFLAGS='-O3 -march=native' ./configure \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" ./configure \
 		--prefix=${INSTALL_DIR} \
 		2>&1 | \
 		tee ${BUILD_DIR}/zlib-config.log > $OUT
@@ -83,7 +107,7 @@ function build_zlib()
 	echo "Building zlib... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/zlib-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking zlib... "
 		time make ${PARALLEL} check \
@@ -97,6 +121,30 @@ function build_zlib()
 }
 
 ######################################################################
+function build_xz()
+{
+	dir="$1"
+	cd $1
+	echo "Configuring xz... "
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" ./configure \
+		--prefix=${INSTALL_DIR} \
+		--disable-static \
+		2>&1 | \
+		tee ${BUILD_DIR}/xz-config.log > $OUT
+
+	echo "Building xz... "
+	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/xz-build.log > $OUT
+
+	echo "Checking xz... "
+	time make ${PARALLEL} check 2>&1 | tee ${BUILD_DIR}/xz-check.log > $OUT
+
+	echo "Installing xz... "
+	time make install 2>&1 | tee ${BUILD_DIR}/xz-install.log > $OUT
+
+	echo "Completed xz: "
+}
+
+######################################################################
 function build_guile()
 {
 	dir="$1"
@@ -104,7 +152,7 @@ function build_guile()
 	cd "$1"
 
 	echo "Configuring guile... "
-	time CFLAGS='-O3 -march=native' ./configure  \
+	time ./configure  \
 		--prefix=${INSTALL_DIR} \
 		--disable-static \
 		--with-sysroot=${INSTALL_DIR} \
@@ -114,7 +162,7 @@ function build_guile()
 	echo "Building guile... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/guile-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking guile... "
 		time make check 2>&1 | tee ${BUILD_DIR}/guile-check.log > $OUT
@@ -132,13 +180,15 @@ function build_autogen()
 	dir="$1"
 	cd $1
 	echo "Configuring autogen... "
-	time ./configure --prefix=${INSTALL_DIR} 2>&1 | \
-		tee ${BUILD_DIR}/autogen-config.log > $OUT
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" \
+		./configure \
+		--prefix=${INSTALL_DIR} \
+		2>&1 | tee ${BUILD_DIR}/autogen-config.log > $OUT
 
 	echo "Building autogen... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/autogen-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking autogen... "
 		time make check 2>&1 | tee ${BUILD_DIR}/autogen-check.log > $OUT
@@ -156,7 +206,7 @@ function build_gmp()
 	dir="$1"
 	cd $1
 	echo "Configuring gmp... "
-	time CFLAGS='-O3 -march=native' ./configure \
+	time ./configure \
 		--prefix=${INSTALL_DIR} \
 		--enable-cxx \
 		--disable-static \
@@ -166,7 +216,7 @@ function build_gmp()
 	echo "Building gmp... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/gmp-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking gmp... "
 		time make ${PARALLEL} check \
@@ -185,7 +235,8 @@ function build_mpfr()
 	dir="$1"
 	cd $1
 	echo "Configuring mpfr... "
-	time CFLAGS='-O3 -march=native' ./configure \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" \
+		./configure \
 		--prefix=${INSTALL_DIR} \
 		--with-gmp=${INSTALL_DIR} \
 		--disable-static \
@@ -195,7 +246,7 @@ function build_mpfr()
 	echo "Building mpfr... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/mpfr-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking mpfr... "
 		time make ${PARALLEL} check \
@@ -214,7 +265,8 @@ function build_mpc()
 	dir="$1"
 	cd $1
 	echo "Configuring mpc... "
-	time CFLAGS='-O3 -march=native' ./configure \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" \
+		./configure \
 		--prefix=${INSTALL_DIR} \
 		--with-gmp=${INSTALL_DIR} \
 		--with-mpfr=${INSTALL_DIR} \
@@ -225,7 +277,7 @@ function build_mpc()
 	echo "Building mpc... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/mpc-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking mpc... "
 		time make ${PARALLEL} check \
@@ -244,9 +296,10 @@ function build_isl()
 	dir="$1"
 	cd $1
 	echo "Configuring isl... "
-	time CFLAGS='-O3 -march=native' ./configure \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" \
+		./configure \
 		--prefix=${INSTALL_DIR} \
-		--with-gcc-arch=native \
+		--with-gcc-arch=${ARCH} \
 		--with-gmp-prefix=${INSTALL_DIR} \
 		--disable-static \
 		2>&1 | \
@@ -255,7 +308,7 @@ function build_isl()
 	echo "Building isl... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/isl-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking isl... "
 		time make ${PARALLEL} check \
@@ -276,7 +329,7 @@ function build_binutils()
 
 	mkdir ${BUILD_DIR}/binutils-build
 	cd ${BUILD_DIR}/binutils-build
-	time CFLAGS="-I${INSTALL_DIR}/include -L${INSTALL_DIR}/lib" \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe -I${INSTALL_DIR}/include -L${INSTALL_DIR}/lib" \
 		${dir}/configure \
 			--prefix=${INSTALL_DIR} \
 			--with-build-time-tools=${INSTALL_DIR} \
@@ -294,7 +347,7 @@ function build_binutils()
 	echo "Building binutils... "
 	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/binutils-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking binutils... "
 		time make check \
@@ -316,7 +369,7 @@ function build_gcc()
 	mkdir ${BUILD_DIR}/gcc-build
 	cd ${BUILD_DIR}/gcc-build
 	time BOOT_LDFLAGS="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
-		CFLAGS="-O3 -march=native" ${dir}/configure \
+		${dir}/configure \
 		--prefix=${INSTALL_DIR} \
 		--with-gnu-as \
 		--with-gnu-ld \
@@ -339,7 +392,7 @@ function build_gcc()
 		BOOT_LDFLAGS="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
 		2>&1 | tee ${BUILD_DIR}/gcc-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		date +"(%T)"
 		echo "Checking gcc... "
@@ -352,7 +405,7 @@ function build_gcc()
 	echo "Installing gcc... "
 	time make \
 		BOOT_LDFLAGS="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
-		install-strip \
+		install \
 		2>&1 | tee ${BUILD_DIR}/gcc-install.log > $OUT
 
 	specfile=$(dirname $(${INSTALL_DIR}/bin/gcc -print-libgcc-file-name))/specs
@@ -369,30 +422,6 @@ function build_gcc()
 
 
 	echo "Completed gcc: "
-}
-
-######################################################################
-function build_xz()
-{
-	dir="$1"
-	cd $1
-	echo "Configuring xz... "
-	time CFLAGS='-O3 -march=native' ./configure \
-		--prefix=${INSTALL_DIR} \
-		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/xz-config.log > $OUT
-
-	echo "Building xz... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/xz-build.log > $OUT
-
-	echo "Checking xz... "
-	time make ${PARALLEL} check 2>&1 | tee ${BUILD_DIR}/xz-check.log > $OUT
-
-	echo "Installing xz... "
-	time make install 2>&1 | tee ${BUILD_DIR}/xz-install.log > $OUT
-
-	echo "Completed xz: "
 }
 
 ######################################################################
@@ -421,7 +450,10 @@ function build_llvm()
 		-DLLVM_TARGETS_TO_BUILD="X86" \
 		-DCMAKE_BUILD_TYPE="Release" \
 		-DPYTHON_EXECUTABLE="/usr/bin/python3" \
-		-DLLVM_ENABLE_ASSERTIONS=On \
+		-DLLVM_BUILD_LLVM_DYLIB=On \
+		-DLLVM_LINK_LLVM_DYLIB=ON \
+		-DLLVM_ENABLE_ASSERTIONS=Off \
+		-DLLVM_ENABLE_ZLIB=Off \
 		-DCMAKE_INSTALL_DO_STRIP=1 \
 		$dir \
 		2>&1 | tee ${BUILD_DIR}/llvm-config.log > $OUT
@@ -430,7 +462,7 @@ function build_llvm()
 	time ninja \
 		2>&1 | tee ${BUILD_DIR}/llvm-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		echo "Testing llvm/clang..."
 		time ninja -k 0 check-clang \
@@ -453,10 +485,9 @@ function build_vim()
 {
 	dir="$1"
 
-	pwd
 	echo "Configuring vim..."
 
-	./configure --with-features=huge \
+	time ./configure --with-features=huge \
 		--enable-multibyte \
 		--enable-rubyinterp=yes \
 		--enable-python3interp=yes \
@@ -472,7 +503,7 @@ function build_vim()
 	time make ${PARALLEL} VIMRUNTIMEDIR=${INSTALL_DIR}/share/vim/vim82 \
 		2>&1 | tee ${BUILD_DIR}/vim-build.log > $OUT
 
-	if [ "$DO_TESTS" -eq "1" ]
+	if [ $DO_TESTS = 1 ]
 	then
 		# FIXME: VIM doesn't appear to have a functional test suite
 		true
@@ -486,22 +517,25 @@ function build_vim()
 }
 
 ######################################################################
+function do_package_strip()
+{
+	return
+}
 
+######################################################################
+
+GCCLOC="ftp://gcc.gnu.org/pub/gcc/infrastructure"
 LLVMLOC="https://github.com/llvm/llvm-project/releases/download"
-
-xPackages="
-	https://www.python.org/ftp/python/3.8.2/Python-3.8.2.tar.xz
-"
 
 PACKAGES="
 	https://www.zlib.net/zlib-1.2.11.tar.gz
 	https://tukaani.org/xz/xz-5.2.5.tar.xz
-	ftp://gcc.gnu.org/pub/gcc/infrastructure/gmp-6.1.0.tar.bz2
+	${GCCLOC}/gmp-6.1.0.tar.bz2
+	${GCCLOC}/mpfr-3.1.4.tar.bz2
+	${GCCLOC}/mpc-1.0.3.tar.gz
+	${GCCLOC}/isl-0.18.tar.bz2
 	https://ftp.gnu.org/gnu/guile/guile-2.0.14.tar.xz
 	http://ftp.gnu.org/gnu/autogen/autogen-5.18.7.tar.xz
-	ftp://gcc.gnu.org/pub/gcc/infrastructure/mpfr-3.1.4.tar.bz2
-	ftp://gcc.gnu.org/pub/gcc/infrastructure/mpc-1.0.3.tar.gz
-	ftp://gcc.gnu.org/pub/gcc/infrastructure/isl-0.18.tar.bz2
 	http://mirror.us-midwest-1.nexcess.net/gnu/binutils/binutils-2.34.tar.xz
 	https://bigsearcher.com/mirrors/gcc/releases/gcc-9.3.0/gcc-9.3.0.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/clang-9.0.1.src.tar.xz
@@ -519,19 +553,18 @@ rm -rf $BUILD_DIR
 mkdir -p $SOURCE_DIR
 mkdir -p $BUILD_DIR
 mkdir -p ${INSTALL_DIR}/lib
-if [ ! -L ${INSTALL_DIR}/lib ]
+if [ ! -L ${INSTALL_DIR}/lib64 ]
 then
 	ln -s lib ${INSTALL_DIR}/lib64
 fi
-cd ${INSTALL_DIR}
-git init .
-
-UPDATE_REPOS=1
+git -C ${INSTALL_DIR} init .
 
 for pkg in $PACKAGES
 do
 	COMMIT=0
-	echo "(" $(date +%T) ") " "================================================================="
+	echo
+	echo -n "====("$(date +%T)")"
+	echo "==============================================================="
 
 
 	case $pkg in
@@ -581,7 +614,7 @@ do
 
 	cd $INSTALL_DIR
 
-	if git tag | grep -q ${name%.src}
+	if git -C ${INSTALL_DIR} tag | grep -q ${name%.src}
 	then
 		echo "Skipping build of $name"
 		continue
@@ -612,10 +645,11 @@ do
 
 	if [ "$COMMIT" = 1 ]
 	then
-		cd ${INSTALL_DIR}
-		git add *
-		git commit -q -m "$name"
-		git tag "$name"
+		do_package_strip ${name}
+
+		git -C ${INSTALL_DIR} add \*
+		git -C ${INSTALL_DIR} commit -q -m "$name"
+		git -C ${INSTALL_DIR} tag "$name"
 	fi
 done
 
