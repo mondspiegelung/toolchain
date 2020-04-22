@@ -10,26 +10,21 @@ BASE_DIR=$(realpath $(dirname $0))
 
 # The next few variables are overridable by setting corresponding environment
 # variables. Their use is as follows:
-#   - SOURCE_DIR: Directory for downloading package tarballs (defaults to
-#     ${BASE_DIR}/SOURCE
-#   - BUILD_DIR: Directory where all compilation will occur in. This directory
-#     *will* grow quite large (tens of gigabytes). It is useful to place it
-#     on a fast disk if you wish to speed your build.
-#   - TC_NAME: Name of the top-level toolchain directory. This defaults to
-#     'toolchain-9.x' currently.
-#   - INSTALL_DIR: Directory into which the new toolchain is installed.
-#     Defaults to ${HOME}/opt/${TC_NAME}. Note: currently to install into
-#     a system directory hierarchy, this entire script needs root access; this
-#     is a large security consideration, and will be mitigated soon.
-TC_NAME=${TC_NAME:-toolchain-9.x}
+#  - SOURCE_DIR: Directory for downloading package tarballs (defaults to
+#    ${BASE_DIR}/SOURCE
+#  - BUILD_DIR: Directory where all compilation will occur in. This directory
+#    *will* grow quite large (tens of gigabytes). It is useful to place it
+#    on a fast disk if you wish to speed your build.
+#  - TC_NAME: Name of the top-level toolchain directory. This defaults to
+#    'toolchain-9.x' currently.
+#  - INSTALL_DIR: Directory into which the new toolchain is installed.
+#    Defaults to ${HOME}/opt/${TC_NAME}. Note: currently to install into
+#    a system directory hierarchy, this entire script needs root access; this
+#    is a large security consideration, and will be mitigated soon.
+TC_NAME=${TC_NAME:-toolchain-tmp}
 SOURCE_DIR=${SOURCE_DIR:-${BASE_DIR}/SOURCE}
-BUILD_DIR=${BUILD_DIR:${BASE_DIR}/BUILD}
+BUILD_DIR=${BUILD_DIR:-${BASE_DIR}/BUILD}
 INSTALL_DIR=${INSTALL_DIR:-${HOME}/opt/${TC_NAME}}
-
-echo "Starting build of toolchain..."
-echo -e "\tArchive dowload directory = $SOURCE_DIR"
-echo -e "\tPackage build directory = $BUILD_DIR"
-echo -e "\tToolchain installation directory = $INSTALL_DIR"
 
 # PARALLEL determines the largest number of concurrent processes that make or
 # ninja may execute; it is set to the value of the nproc command by default
@@ -40,6 +35,27 @@ PARALLEL="-j $(nproc)"
 OUT=/dev/null
 #OUT=/dev/stderr
 
+# Run program test suites
+DO_TESTS=1
+
+# ARCH is used to set the ISA for the build...
+ARCH=${ARCH:-nehalem}
+
+UPDATE_REPOS=1
+
+SUDO="sudo"
+SUDO_REFRESH="sudo -v"
+
+if [ -f ${BASE_DIR}/local_settings ]
+then
+	source ${BASE_DIR}/local_settings
+fi
+
+echo "Starting build of toolchain..."
+echo -e "\tArchive dowload directory = $SOURCE_DIR"
+echo -e "\tPackage build directory = $BUILD_DIR"
+echo -e "\tToolchain installation directory = $INSTALL_DIR"
+
 # this is used to format the 'time' builtin's output at the end of build steps
 export TIMEFORMAT=$'    (%P%%) real: %lR, user: %lU, sys: %lS'
 
@@ -48,14 +64,6 @@ export PATH="${INSTALL_DIR}/bin:$PATH"
 
 # FIXME - this may not be necessary
 export PKG_CONFIG_PATH=${INSTALL_DIR}/lib/pkgconfig:$PKG_CONFIG_PATH
-
-# Run program test suites
-DO_TESTS=1
-
-# ARCH is used to set the ISA for the build...
-ARCH=${ARCH:-nehalem}
-
-UPDATE_REPOS=1
 
 ##
 # Pulls the top-level directory name out of a tarbal
@@ -101,11 +109,11 @@ function build_zlib()
 	echo "Configuring zlib... "
 	time CFLAGS="-O3 -g -march=${ARCH} -pipe" ./configure \
 		--prefix=${INSTALL_DIR} \
-		2>&1 | \
-		tee ${BUILD_DIR}/zlib-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/zlib-config.log > $OUT
 
 	echo "Building zlib... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/zlib-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/zlib-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -115,7 +123,8 @@ function build_zlib()
 	fi
 
 	echo "Installing zlib... "
-	time make install 2>&1 | tee ${BUILD_DIR}/zlib-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/zlib-install.log > $OUT
 
 	echo "Completed zlib: "
 }
@@ -129,17 +138,19 @@ function build_xz()
 	time CFLAGS="-O3 -g -march=${ARCH} -pipe" ./configure \
 		--prefix=${INSTALL_DIR} \
 		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/xz-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/xz-config.log > $OUT
 
 	echo "Building xz... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/xz-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/xz-build.log > $OUT
 
 	echo "Checking xz... "
-	time make ${PARALLEL} check 2>&1 | tee ${BUILD_DIR}/xz-check.log > $OUT
+	time make ${PARALLEL} check \
+		2>&1 | tee ${BUILD_DIR}/xz-check.log > $OUT
 
 	echo "Installing xz... "
-	time make install 2>&1 | tee ${BUILD_DIR}/xz-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/xz-install.log > $OUT
 
 	echo "Completed xz: "
 }
@@ -160,16 +171,19 @@ function build_guile()
 		2>&1 | tee ${BUILD_DIR}/guile-config.log > $OUT
 
 	echo "Building guile... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/guile-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/guile-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking guile... "
-		time make check 2>&1 | tee ${BUILD_DIR}/guile-check.log > $OUT
+		time make check \
+			2>&1 | tee ${BUILD_DIR}/guile-check.log > $OUT
 	fi
 
 	echo "Installing guile... "
-	time make install 2>&1 | tee ${BUILD_DIR}/guile-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/guile-install.log > $OUT
 
 	echo "Completed guile: "
 }
@@ -186,16 +200,19 @@ function build_autogen()
 		2>&1 | tee ${BUILD_DIR}/autogen-config.log > $OUT
 
 	echo "Building autogen... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/autogen-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/autogen-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking autogen... "
-		time make check 2>&1 | tee ${BUILD_DIR}/autogen-check.log > $OUT
+		time make check \
+			2>&1 | tee ${BUILD_DIR}/autogen-check.log > $OUT
 	fi
 
 	echo "Installing autogen... "
-	time make install 2>&1 | tee ${BUILD_DIR}/autogen-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/autogen-install.log > $OUT
 
 	echo "Completed autogen: "
 }
@@ -206,15 +223,16 @@ function build_gmp()
 	dir="$1"
 	cd $1
 	echo "Configuring gmp... "
-	time ./configure \
+	time CFLAGS="-O3 -g -march=${ARCH} -pipe" \
+		./configure \
 		--prefix=${INSTALL_DIR} \
 		--enable-cxx \
 		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/gmp-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/gmp-config.log > $OUT
 
 	echo "Building gmp... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/gmp-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/gmp-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -224,7 +242,8 @@ function build_gmp()
 	fi
 
 	echo "Installing gmp... "
-	time make install 2>&1 | tee ${BUILD_DIR}/gmp-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/gmp-install.log > $OUT
 
 	echo "Completed gmp: "
 }
@@ -240,11 +259,11 @@ function build_mpfr()
 		--prefix=${INSTALL_DIR} \
 		--with-gmp=${INSTALL_DIR} \
 		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/mpfr-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/mpfr-config.log > $OUT
 
 	echo "Building mpfr... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/mpfr-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/mpfr-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -254,7 +273,8 @@ function build_mpfr()
 	fi
 
 	echo "Installing mpfr... "
-	time make install 2>&1 | tee ${BUILD_DIR}/mpfr-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/mpfr-install.log > $OUT
 
 	echo "Completed mpfr: "
 }
@@ -271,11 +291,11 @@ function build_mpc()
 		--with-gmp=${INSTALL_DIR} \
 		--with-mpfr=${INSTALL_DIR} \
 		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/mpc-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/mpc-config.log > $OUT
 
 	echo "Building mpc... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/mpc-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/mpc-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -285,7 +305,8 @@ function build_mpc()
 	fi
 
 	echo "Installing mpc... "
-	time make install 2>&1 | tee ${BUILD_DIR}/mpc-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/mpc-install.log > $OUT
 
 	echo "Completed mpc: "
 }
@@ -302,11 +323,11 @@ function build_isl()
 		--with-gcc-arch=${ARCH} \
 		--with-gmp-prefix=${INSTALL_DIR} \
 		--disable-static \
-		2>&1 | \
-		tee ${BUILD_DIR}/isl-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/isl-config.log > $OUT
 
 	echo "Building isl... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/isl-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/isl-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -316,7 +337,8 @@ function build_isl()
 	fi
 
 	echo "Installing isl... "
-	time make install 2>&1 | tee ${BUILD_DIR}/isl-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/isl-install.log > $OUT
 
 	echo "Completed isl: "
 }
@@ -345,7 +367,8 @@ function build_binutils()
 			2>&1 | tee ${BUILD_DIR}/binutils-config.log > $OUT
 
 	echo "Building binutils... "
-	time make ${PARALLEL} 2>&1 | tee ${BUILD_DIR}/binutils-build.log > $OUT
+	time make ${PARALLEL} \
+		2>&1 | tee ${BUILD_DIR}/binutils-build.log > $OUT
 
 	if [ $DO_TESTS = 1 ]
 	then
@@ -355,7 +378,8 @@ function build_binutils()
 	fi
 
 	echo "Installing binutils... "
-	time make install 2>&1 | tee ${BUILD_DIR}/binutils-install.log > $OUT
+	time ${SUDO} make install \
+		2>&1 | tee ${BUILD_DIR}/binutils-install.log > $OUT
 
 	echo "Completed binutils: "
 }
@@ -384,8 +408,7 @@ function build_gcc()
 		--enable-__cxa_atexit \
 		--enable-lto \
 		--disable-multilib \
-		2>&1 | \
-		tee ${BUILD_DIR}/gcc-config.log > $OUT
+		2>&1 | tee ${BUILD_DIR}/gcc-config.log > $OUT
 
 	echo "Building gcc... "
 	time make ${PARALLEL} \
@@ -394,7 +417,6 @@ function build_gcc()
 
 	if [ $DO_TESTS = 1 ]
 	then
-		date +"(%T)"
 		echo "Checking gcc... "
 		time make -k ${PARALLEL} \
 			BOOT_LDFLAGS="-L${INSTALL_DIR}/lib  -Wl,-rpath,${INSTALL_DIR}/lib" \
@@ -403,23 +425,23 @@ function build_gcc()
 	fi
 
 	echo "Installing gcc... "
-	time make \
+	time ${SUDO} make \
 		BOOT_LDFLAGS="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
 		install \
 		2>&1 | tee ${BUILD_DIR}/gcc-install.log > $OUT
 
 	specfile=$(dirname $(${INSTALL_DIR}/bin/gcc -print-libgcc-file-name))/specs
 
-	cat <<- EOF > edit.sed
+	cat <<- EOF > edit.sed.$$
 	/^\*link:$/ {
-		n
-		s@--eh-frame-hdr} @& %{!shared: %{!static: -rpath ${INSTALL_DIR}/lib}}\t@
+	n
+	s@--eh-frame-hdr} @& %{!shared: %{!static: -rpath ${INSTALL_DIR}/lib}}\t@
 	}
 	EOF
 
-	${INSTALL_DIR}/bin/gcc -dumpspecs | sed -f edit.sed > ${specfile}
-	rm -f edit.sed
-
+	${INSTALL_DIR}/bin/gcc -dumpspecs | sed -f edit.sed.$$ > tmpspec.$$
+	${SUDO} cp tmpspec.$$ ${specfile}
+	rm -f edit.sed.$$ tmpspec.$$
 
 	echo "Completed gcc: "
 }
@@ -474,7 +496,7 @@ function build_llvm()
 	fi
 
 	echo "Installing llvm/clang..."
-	time ninja install \
+	time ${SUDO} ninja install \
 		2>&1 | tee ${BUILD_DIR}/llvm-install.log > $OUT
 
 	echo "Completed llvm/clang: "
@@ -510,7 +532,7 @@ function build_vim()
 	fi
 
 	echo "Installing vim..."
-	time make install \
+	time ${SUDO} make install \
 		2>&1 | tee ${BUILD_DIR}/vim-install.log > $OUT
 
 	echo "Completed vim: "
@@ -552,12 +574,31 @@ rm -rf $BUILD_DIR
 
 mkdir -p $SOURCE_DIR
 mkdir -p $BUILD_DIR
-mkdir -p ${INSTALL_DIR}/lib
+${SUDO} mkdir -p ${INSTALL_DIR}/lib
+
 if [ ! -L ${INSTALL_DIR}/lib64 ]
 then
-	ln -s lib ${INSTALL_DIR}/lib64
+	${SUDO} ln -s lib ${INSTALL_DIR}/lib64
 fi
-git -C ${INSTALL_DIR} init .
+
+if [ ! -d ${INSTALL_DIR}/.git ]
+then
+	${SUDO} git -C ${INSTALL_DIR} init .
+	${SUDO} git -C ${INSTALL_DIR} config user.name builder
+	${SUDO} git -C ${INSTALL_DIR} config user.email builder@$(hostname -f)
+fi
+
+function my_refresh()
+{
+	while true
+	do
+		echo $(date) "Refreshing credentials..." > /dev/stderr
+		${SUDO_REFRESH}
+		sleep 300
+	done
+}
+
+my_refresh &
 
 for pkg in $PACKAGES
 do
@@ -647,11 +688,14 @@ do
 	then
 		do_package_strip ${name}
 
-		git -C ${INSTALL_DIR} add \*
-		git -C ${INSTALL_DIR} commit -q -m "$name"
-		git -C ${INSTALL_DIR} tag "$name"
+		${SUDO} git -C ${INSTALL_DIR} add \*
+		${SUDO} git -C ${INSTALL_DIR} commit -q -m "$name"
+		${SUDO} git -C ${INSTALL_DIR} tag "$name"
 	fi
 done
+
+kill %1
+wait %1 > /dev/null 2>&1
 
 echo "Detected Failures:"
 grep FAIL ${BUILD_DIR}/*.log | egrep -v 'FAIL: *0$'
