@@ -18,9 +18,7 @@ BASE_DIR=$(realpath $(dirname $0))
 #  - TC_NAME: Name of the top-level toolchain directory. This defaults to
 #    'toolchain-9.x' currently.
 #  - INSTALL_DIR: Directory into which the new toolchain is installed.
-#    Defaults to ${HOME}/opt/${TC_NAME}. Note: currently to install into
-#    a system directory hierarchy, this entire script needs root access; this
-#    is a large security consideration, and will be mitigated soon.
+#    Defaults to ${HOME}/opt/${TC_NAME}.
 TC_NAME=${TC_NAME:-toolchain-tmp}
 SOURCE_DIR=${SOURCE_DIR:-${BASE_DIR}/SOURCE}
 BUILD_DIR=${BUILD_DIR:-${BASE_DIR}/BUILD}
@@ -42,9 +40,6 @@ DO_TESTS=1
 ARCH=${ARCH:-nehalem}
 
 UPDATE_REPOS=1
-
-SUDO="sudo"
-SUDO_REFRESH="sudo -v"
 
 if [ -f ${BASE_DIR}/local_settings ]
 then
@@ -177,7 +172,7 @@ function build_guile()
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking guile... "
-		time make check \
+		time make ${PARALLEL} check \
 			2>&1 | tee ${BUILD_DIR}/guile-check.log > $OUT
 	fi
 
@@ -206,7 +201,7 @@ function build_autogen()
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking autogen... "
-		time make check \
+		time make ${PARALLEL} check \
 			2>&1 | tee ${BUILD_DIR}/autogen-check.log > $OUT
 	fi
 
@@ -373,7 +368,7 @@ function build_binutils()
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Checking binutils... "
-		time make check \
+		time make ${PARALLEL} check \
 			2>&1 | tee ${BUILD_DIR}/binutils-check.log > $OUT
 	fi
 
@@ -487,11 +482,11 @@ function build_llvm()
 	if [ $DO_TESTS = 1 ]
 	then
 		echo "Testing llvm/clang..."
-		time ninja -k 0 check-clang \
+		time ninja -k 0 ${PARALLEL} check-clang \
 			2>&1 | tee ${BUILD_DIR}/llvm-check.log > $OUT
 
 		echo "Testing llvm/libcxx..."
-		time ninja -k 0 check-libcxx \
+		time ninja -k 0 ${PARALLEL} check-libcxx \
 			2>&1 | tee -a ${BUILD_DIR}/llvm-check.log > $OUT
 	fi
 
@@ -570,8 +565,28 @@ PACKAGES="
 	https://github.com/vim/vim.git
 "
 
-rm -rf $BUILD_DIR
+parent_real_directory=`dirname ${INSTALL_DIR}`
+while [ "$parent_real_directory" != '/' ]
+do
+	[ -d $parent_real_directory ] && break
+	parent_real_directory=`dirname $parent_real_directory`
+done
 
+
+if [ ! -w $parent_real_directory ]
+then
+	SUDO="sudo"
+	function my_refresh()
+	{
+		while true
+		do
+			sudo -v
+			sleep 300
+		done
+	}
+fi
+
+rm -rf $BUILD_DIR
 mkdir -p $SOURCE_DIR
 mkdir -p $BUILD_DIR
 ${SUDO} mkdir -p ${INSTALL_DIR}/lib
@@ -588,17 +603,10 @@ then
 	${SUDO} git -C ${INSTALL_DIR} config user.email builder@$(hostname -f)
 fi
 
-function my_refresh()
-{
-	while true
-	do
-		echo $(date) "Refreshing credentials..." > /dev/stderr
-		${SUDO_REFRESH}
-		sleep 300
-	done
-}
-
-my_refresh &
+if [ ! -w $parent_real_directory ]
+then
+	my_refresh &
+fi
 
 for pkg in $PACKAGES
 do
