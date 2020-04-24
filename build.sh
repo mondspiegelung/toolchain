@@ -540,13 +540,44 @@ function do_package_strip()
 }
 
 ######################################################################
+function do_doc_compress()
+{
+	local manifest=$1
+
+	while read f
+	do
+		case $f in
+		 *.xz)
+			;;
+		 share/man/*|share/info/*.info*)
+			if [ -L ${INSTALL_DIR}/$f ]
+			then
+				l=$(readlink ${INSTALL_DIR}/$f)
+				${SUDO} ln -sf ${l}.xz ${INSTALL_DIR}/${f}.xz
+				${SUDO} git -C ${INSTALL_DIR} rm --quiet ${f}
+				${SUDO} git -C ${INSTALL_DIR} add ${f}.xz
+			elif [ -f ${INSTALL_DIR}/$f ]
+			then
+				${SUDO} chmod 644 ${INSTALL_DIR}/$f
+				${SUDO} xz -k9e ${INSTALL_DIR}/$f
+				${SUDO} git -C ${INSTALL_DIR} rm --quiet $f
+				${SUDO} git -C ${INSTALL_DIR} add ${f}.xz
+			else
+				echo "??? $f"
+			fi
+			;;
+		esac
+	done < $manifest
+}
+
+######################################################################
 
 GCCLOC="ftp://gcc.gnu.org/pub/gcc/infrastructure"
 LLVMLOC="https://github.com/llvm/llvm-project/releases/download"
 
 PACKAGES="
-	https://www.zlib.net/zlib-1.2.11.tar.gz
 	https://tukaani.org/xz/xz-5.2.5.tar.xz
+	https://www.zlib.net/zlib-1.2.11.tar.gz
 	${GCCLOC}/gmp-6.1.0.tar.bz2
 	${GCCLOC}/mpfr-3.1.4.tar.bz2
 	${GCCLOC}/mpc-1.0.3.tar.gz
@@ -697,8 +728,17 @@ do
 		do_package_strip ${name}
 
 		${SUDO} git -C ${INSTALL_DIR} add \*
-		${SUDO} git -C ${INSTALL_DIR} commit -q -m "$name"
+
+		manifest=$(mktemp /tmp/build.$$.XXXXXX)
+		${SUDO} git -C ${INSTALL_DIR} status --porcelain \
+			| sed -ne 's/^[AM] \+//gp' > $manifest
+
+		${SUDO} git -C ${INSTALL_DIR} commit -q -m "Added package $name"
 		${SUDO} git -C ${INSTALL_DIR} tag "$name"
+
+		do_doc_compress $manifest
+		${SUDO} git -C ${INSTALL_DIR} commit -q \
+			-m "Compressed man/info pages for $name"
 	fi
 done
 
