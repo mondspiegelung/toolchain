@@ -19,10 +19,10 @@ BASE_DIR=$(realpath $(dirname $0))
 #    'toolchain-9.x' currently.
 #  - INSTALL_DIR: Directory into which the new toolchain is installed.
 #    Defaults to ${HOME}/opt/${TC_NAME}.
-TC_NAME=${TC_NAME:-toolchain-tmp}
+TC_NAME=${TC_NAME:-gcc-11}
 SOURCE_DIR=${SOURCE_DIR:-${BASE_DIR}/SOURCE}
 BUILD_DIR=${BUILD_DIR:-${BASE_DIR}/BUILD}
-INSTALL_DIR=${INSTALL_DIR:-${HOME}/opt/${TC_NAME}}
+INSTALL_DIR=${INSTALL_DIR:-${BASE_DIR}/${TC_NAME}}
 
 # PARALLEL determines the largest number of concurrent processes that make or
 # ninja may execute; it is set to the value of the nproc command by default
@@ -387,9 +387,10 @@ function build_gcc()
 
 	mkdir ${BUILD_DIR}/gcc-build
 	cd ${BUILD_DIR}/gcc-build
-	time BOOT_LDFLAGS="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
-		${dir}/configure \
+	time ${dir}/configure \
 		--prefix=${INSTALL_DIR} \
+		--with-boot-ldflags="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
+		--with-stage1-ldflags="-L${INSTALL_DIR}/lib -Wl,-rpath,${INSTALL_DIR}/lib" \
 		--with-gnu-as \
 		--with-gnu-ld \
 		--with-as=${INSTALL_DIR}/bin/as \
@@ -433,6 +434,8 @@ function build_gcc()
 	s@--eh-frame-hdr} @& %{!shared: %{!static: -rpath ${INSTALL_DIR}/lib}}\t@
 	}
 	EOF
+
+# I have gcc 11.1 built with --with-specs='%{!static:%{!m32:-Wl,-rpath,/home/jwakely/gcc/11.1.0/lib64}%{m32:-Wl,-rpath,/home/jwakely/gcc/11.1.0/lib}} and it works perfectly
 
 	${INSTALL_DIR}/bin/gcc -dumpspecs | sed -f edit.sed.$$ > tmpspec.$$
 	${SUDO} cp tmpspec.$$ ${specfile}
@@ -575,17 +578,7 @@ function do_doc_compress()
 GCCLOC="ftp://gcc.gnu.org/pub/gcc/infrastructure"
 LLVMLOC="https://github.com/llvm/llvm-project/releases/download"
 
-PACKAGES="
-	https://tukaani.org/xz/xz-5.2.5.tar.xz
-	https://www.zlib.net/zlib-1.2.11.tar.gz
-	${GCCLOC}/gmp-6.1.0.tar.bz2
-	${GCCLOC}/mpfr-3.1.4.tar.bz2
-	${GCCLOC}/mpc-1.0.3.tar.gz
-	${GCCLOC}/isl-0.18.tar.bz2
-	https://ftp.gnu.org/gnu/guile/guile-2.0.14.tar.xz
-	http://ftp.gnu.org/gnu/autogen/autogen-5.18.7.tar.xz
-	http://mirror.us-midwest-1.nexcess.net/gnu/binutils/binutils-2.34.tar.xz
-	https://bigsearcher.com/mirrors/gcc/releases/gcc-9.3.0/gcc-9.3.0.tar.xz
+FOO="
 	${LLVMLOC}/llvmorg-9.0.1/clang-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/clang-tools-extra-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/compiler-rt-9.0.1.src.tar.xz
@@ -594,6 +587,19 @@ PACKAGES="
 	${LLVMLOC}/llvmorg-9.0.1/lld-9.0.1.src.tar.xz
 	${LLVMLOC}/llvmorg-9.0.1/llvm-9.0.1.src.tar.xz
 	https://github.com/vim/vim.git
+"
+
+PACKAGES="
+	https://tukaani.org/xz/xz-5.2.5.tar.xz
+	https://www.zlib.net/zlib-1.2.11.tar.gz
+	${GCCLOC}/gmp-6.1.0.tar.bz2
+	${GCCLOC}/mpfr-3.1.6.tar.bz2
+	${GCCLOC}/mpc-1.0.3.tar.gz
+	${GCCLOC}/isl-0.18.tar.bz2
+	https://ftp.gnu.org/gnu/guile/guile-2.0.14.tar.xz
+	http://ftp.gnu.org/gnu/autogen/autogen-5.18.7.tar.xz
+	http://mirror.us-midwest-1.nexcess.net/gnu/binutils/binutils-2.34.tar.xz
+	http://mirrors.concertpass.com/gcc/releases/gcc-11.2.0/gcc-11.2.0.tar.xz
 "
 
 parent_real_directory=`dirname ${INSTALL_DIR}`
